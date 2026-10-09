@@ -1,0 +1,12 @@
+{
+	"description": "API for Le Logbook",
+	"dependencies": {
+		"vibe-d": "~>0.10.3"
+	},
+	"authors": [
+		"mostypc123"
+	],
+	"copyright": "Copyright © 2026, mostypc123",
+	"license": "MIT",
+	"name": "le-logbook"
+}
