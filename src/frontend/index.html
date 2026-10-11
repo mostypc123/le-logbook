@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>le-logbook tracker</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
+    body { display: flex; flex-direction: column; }
+    form { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px; background: #1e1e2e; color: #eee; }
+    label { display: flex; flex-direction: column; font-size: 12px; gap: 2px; flex: 1 1 220px; }
+    input { padding: 6px; font-size: 14px; border: 0; border-radius: 4px; }
+    button { padding: 6px 14px; font-size: 14px; border: 0; border-radius: 4px; cursor: pointer; align-self: flex-end; }
+    #status { padding: 4px 8px; font-size: 13px; background: #2a2a3c; color: #ccc; }
+    #map { flex: 1; }
+  </style>
+</head>
+<body>
+  <form id="form">
+    <label>Backend URL
+      <input id="url" type="url" placeholder="https://example.com" required>
+    </label>
+    <label>Flight UUID
+      <input id="uuid" type="text" placeholder="test-123" required>
+    </label>
+    <button type="submit">Track</button>
+    <button type="button" id="stop">Stop</button>
+  </form>
+  <div id="status">Enter the backend URL and a flight uuid.</div>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const POLL_MS = 5000;
+
+    const map = L.map("map").setView([20, 0], 2);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap contributors"
+    }).addTo(map);
+
+    const urlInput = document.getElementById("url");
+    const uuidInput = document.getElementById("uuid");
+    const statusEl = document.getElementById("status");
+
+    let marker = null;
+    let trail = [];
+    let line = null;
+    let timer = null;
+    let firstFix = true;
+
+    try {
+      urlInput.value = localStorage.getItem("logbook.url") || "";
+      uuidInput.value = localStorage.getItem("logbook.uuid") || "";
+    } catch (e) {}
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+
+    async function poll(base, uuid) {
+      try {
+        const res = await fetch(base.replace(/\/+$/, "") + "/tracker/get", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ uuid })
+        });
+        const data = await res.json();
+
+        if (data.status !== "ok") {
+          setStatus("Backend says: " + (data.msg || "fail"));
+          return;
+        }
+
+        const lat = parseFloat(data.lat);
+        const lon = parseFloat(data.log);
+        if (Number.isNaN(lat) || Number.isNaN(lon)) {
+          setStatus("Got a plane, but lat/log are not numbers: " + data.lat + ", " + data.log);
+          return;
+        }
+
+        // Extend the trail (skip duplicate points)
+        const last = trail[trail.length - 1];
+        if (!last || last[0] !== lat || last[1] !== lon) {
+          trail.push([lat, lon]);
+          if (!line) {
+            line = L.polyline(trail, { color: "#e63946", weight: 3, opacity: 0.8 }).addTo(map);
+          } else {
+            line.setLatLngs(trail);
+          }
+        }
+
+        const text = data.pln + " | " + data.spd + " kt | " + lat.toFixed(4) + ", " + lon.toFixed(4);
+        if (!marker) {
+          marker = L.marker([lat, lon]).addTo(map);
+        } else {
+          marker.setLatLng([lat, lon]);
+        }
+        marker.bindPopup(text);
+
+        if (firstFix) {
+          map.setView([lat, lon], 8);
+          firstFix = false;
+        } else if (!map.getBounds().contains([lat, lon])) {
+          map.panTo([lat, lon]);
+        }
+
+        setStatus(text + " (updated " + new Date().toLocaleTimeString() + ")");
+      } catch (e) {
+        setStatus("Request failed: " + e.message + " (check the URL and CORS)");
+      }
+    }
+
+    function stop() {
+      if (timer) clearInterval(timer);
+      timer = null;
+    }
+
+    document.getElementById("form").addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      const base = urlInput.value.trim();
+      const uuid = uuidInput.value.trim();
+
+      try {
+        localStorage.setItem("logbook.url", base);
+        localStorage.setItem("logbook.uuid", uuid);
+      } catch (e) {}
+
+      stop();
+      firstFix = true;
+
+      // Reset trail and marker for the new track
+      trail = [];
+      if (line) { map.removeLayer(line); line = null; }
+      if (marker) { map.removeLayer(marker); marker = null; }
+
+      setStatus("Contacting " + base + " ...");
+      poll(base, uuid);
+      timer = setInterval(() => poll(base, uuid), POLL_MS);
+    });
+
+    document.getElementById("stop").addEventListener("click", () => {
+      stop();
+      setStatus("Stopped.");
+    });
+  </script>
+</body>
+</html>

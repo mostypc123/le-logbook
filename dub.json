@@ -8,5 +8,6 @@
 	],
 	"copyright": "Copyright © 2026, mostypc123",
 	"license": "MIT",
-	"name": "le-logbook"
+	"name": "le-logbook",
+	"sourcePaths": ["src/server"]
 }
